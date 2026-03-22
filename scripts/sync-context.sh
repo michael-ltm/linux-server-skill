@@ -34,6 +34,20 @@ fail() { echo -e "${RED}✗${NC} $1" >&2; }
 warn() { echo -e "${YELLOW}!${NC} $1"; }
 info() { echo -e "${BLUE}→${NC} $1"; }
 
+# mask_ip: partially redact an IPv4 address for display (last two octets)
+#   81.70.98.137 → 81.70.*.*
+mask_ip() {
+  printf '%s' "$1" | sed 's/\([0-9]*\.[0-9]*\)\.[0-9]*\.[0-9]*/\1.*.*/'
+}
+
+# mask_key: show only filename of a key path, never the full path
+#   /Users/ming/Downloads/aaa.pem → ~/.../aaa.pem
+mask_key() {
+  local f
+  f=$(basename "$1" 2>/dev/null || printf '%s' "$1")
+  printf '~/.../\%s' "$f"
+}
+
 # Runtime password (never stored in files)
 _SSH_PASSWORD=""
 
@@ -201,7 +215,8 @@ cmd_list() {
       [ "$auth" = "password" ] && auth_icon="${YELLOW}[pwd]${NC}" || auth_icon="${GREEN}[key]${NC}"
       local default_mark=""
       [ "$id" = "$default_id" ] && default_mark=" ${GREEN}← default${NC}"
-      echo -e "  ${BOLD}$id${NC}  $host:$port  $user  $auth_icon  ${CYAN}$label${NC}$default_mark"
+      # Display masked IP in terminal output
+      echo -e "  ${BOLD}$id${NC}  $(mask_ip "$host"):$port  $user  $auth_icon  ${CYAN}$label${NC}$default_mark"
 
       if [ -f "$SNAPSHOTS_DIR/$id.json" ]; then
         local synced_at os
@@ -414,8 +429,8 @@ cmd_sync() {
 
   echo ""
   local auth_label=""
-  [ "$auth_type" = "key" ] && auth_label="key: $key_path" || auth_label="password auth"
-  info "Syncing: $server_id ($user@$host:$port) [$auth_label]"
+  [ "$auth_type" = "key" ] && auth_label="key: $(mask_key "$key_path")" || auth_label="password auth"
+  info "Syncing: $server_id ($user@$(mask_ip "$host"):$port) [$auth_label]"
 
   # ── Test connection ──────────────────────────────────────────────────────────
   info "Testing SSH connection..."
@@ -423,10 +438,10 @@ cmd_sync() {
     fail "SSH connection failed"
     if [ "$auth_type" = "key" ]; then
       echo "  Check: host, port, user, key file path and permissions"
-      echo "  Test:  ssh -i $key_path -p $port $user@$host"
+      echo "  Key:   $(mask_key "$key_path")  |  Host: $(mask_ip "$host"):$port"
     else
       echo "  Check: host, port, user, password"
-      echo "  Test:  sshpass -p '<pass>' ssh -p $port $user@$host"
+      echo "  Host:  $(mask_ip "$host"):$port  |  User: $user"
       _SSH_PASSWORD=""  # clear cached password so user can re-enter
     fi
     exit 1
@@ -519,7 +534,7 @@ cmd_sync() {
   echo ""
   echo -e "${BOLD}${CYAN}Snapshot Summary: $server_id${NC}"
   echo -e "${CYAN}──────────────────────────────────────────────────${NC}"
-  echo "$enriched_snapshot" | jq -r '"  Host:        \(.meta.hostname) (\(.meta.public_ip))"'
+  echo "$enriched_snapshot" | jq -r '"  Host:        \(.meta.hostname) [\(._server_id)]"'
   echo "$enriched_snapshot" | jq -r '"  OS:          \(.meta.os)"'
   echo "$enriched_snapshot" | jq -r '"  Resources:   CPU \(.meta.resources.cpu_cores) cores | RAM \(.meta.resources.ram) | Disk \(.meta.resources.disk.used)/\(.meta.resources.disk.total) (\(.meta.resources.disk.pct))"'
   echo ""
@@ -587,8 +602,9 @@ cmd_show() {
   echo -e "${BOLD}${CYAN}Server Snapshot: $server_id${NC}"
   echo -e "${CYAN}══════════════════════════════════════════════════${NC}"
 
-  jq -r '"  \(.meta.hostname) (\(.meta.public_ip))  |  \(.meta.os)  |  up: \(.meta.uptime)"' "$snapshot_file"
-  jq -r '"  Auth: \(._connection.auth_type)  |  Synced: \(._synced_at)"' "$snapshot_file"
+  # Mask IP in display: show hostname + masked IP
+  jq -r '"  \(.meta.hostname) (\(.meta.public_ip | split(".") | .[0:2] | join(".") + ".*.*"))  |  \(.meta.os)  |  up: \(.meta.uptime)"' "$snapshot_file"
+  jq -r '"  Auth: \(._connection.auth_type)  |  User: \(._connection.user)  |  Synced: \(._synced_at)"' "$snapshot_file"
   echo ""
 
   echo -e "${BOLD}Websites ($(jq '.websites | length' "$snapshot_file")):${NC}"

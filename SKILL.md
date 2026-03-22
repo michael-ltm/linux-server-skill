@@ -5,6 +5,50 @@ description: Manage, deploy, and monitor Linux servers via SSH. Like a BaoTa/1Pa
 
 # Linux Server Operations
 
+---
+
+## ⚠ SENSITIVE DATA — MANDATORY OUTPUT RULES
+
+**These rules apply to EVERY response. No exceptions.**
+
+### Never display these in chat output:
+| Sensitive field | Where it appears | Instead, say… |
+|---|---|---|
+| Server IP / hostname | snapshot `meta.public_ip`, `_connection.host` | Use server ID only: `james` |
+| SSH private key path | `_connection.key_path`, `servers.json` | `"configured key"` |
+| SSH private key content | Any `-----BEGIN ... KEY-----` | Never display under any circumstance |
+| SSH password | Runtime only, never stored | `"password auth configured"` |
+| `.env` file values | Any `KEY=value` line | List key names only: `KEY=***` |
+| Database passwords | `DB_PASS=`, `MYSQL_PASSWORD=`, etc. | `DB_PASS=***` |
+| API keys / tokens / secrets | `*_KEY=`, `*_SECRET=`, `*_TOKEN=` | `API_KEY=***` |
+| JWT / signing secrets | `JWT_SECRET=`, `SECRET_KEY=` | `JWT_SECRET=***` |
+
+### When constructing SSH commands for explanations:
+```
+# ✗ Never write this in chat:
+ssh -i /Users/ming/Downloads/aaa.pem root@81.70.98.137 '...'
+
+# ✓ Write this instead (use placeholders, run the actual command silently via tool):
+# [james] Running: ...
+```
+
+### When reading config or .env files:
+```
+# ✓ Show structure, mask values:
+DB_HOST=db.example.com      # ← show (not secret)
+DB_USER=myapp               # ← show (not secret)
+DB_PASS=***                 # ← MASK
+API_KEY=***                 # ← MASK
+```
+
+### Checklist before every response:
+- [ ] No raw IP address shown (use server ID)
+- [ ] No key file paths shown
+- [ ] No password / secret / token values shown
+- [ ] SSH command examples use `<key>` and `<host>` placeholders
+
+---
+
 ## Session Start — Read Context First
 
 **Before doing anything**, check if a local context file exists in the workspace:
