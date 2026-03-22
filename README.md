@@ -1,5 +1,9 @@
 # Linux Server Ops — AI Agent Skill
 
+**Language / 语言**: English | [简体中文](README.zh.md)
+
+---
+
 An AI agent skill that turns your coding assistant into a full-featured Linux server management panel — like BaoTa / 1Panel, but driven entirely by AI over SSH.
 
 ## What It Does
