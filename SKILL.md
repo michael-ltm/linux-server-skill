@@ -127,28 +127,113 @@ scp -i <key_path> -P <port> <user>@<host>:<remote_file> <local_path>
 
 ```bash
 # ── Detect active SOCKS5 / HTTP proxy ────────────────────────────────────
+# Returns: "socks5://127.0.0.1:<port>"  or  "http://127.0.0.1:<port>"  or  ""
 detect_proxy() {
-  # 1. Explicit env vars (Clash Verge / V2Ray often set these)
-  local p="${ALL_PROXY:-${all_proxy:-${SOCKS5_PROXY:-${socks5_proxy:-}}}}"
+  # ── Priority 1: explicit env vars ────────────────────────────────────
+  local p="${ALL_PROXY:-${all_proxy:-${SOCKS5_PROXY:-${socks5_proxy:-${HTTPS_PROXY:-${https_proxy:-}}}}}}"
   [ -n "$p" ] && echo "$p" && return
 
-  # 2. macOS system SOCKS proxy (networksetup)
-  local iface
-  iface=$(networksetup -listnetworkserviceorder 2>/dev/null \
-    | awk -F'[()]' '/\(Hardware Port/{print $4; exit}')
-  iface="${iface:-Wi-Fi}"
-  local info
-  info=$(networksetup -getsocksfirewallproxy "$iface" 2>/dev/null)
-  if echo "$info" | grep -q "^Enabled: Yes"; then
-    local h port
-    h=$(echo "$info"    | awk '/^Server:/{print $2}')
-    port=$(echo "$info" | awk '/^Port:/{print $2}')
-    echo "socks5://$h:$port" && return
-  fi
+  # ── Priority 2: macOS system proxy (networksetup) ────────────────────
+  # Try every active network interface
+  local ifaces
+  ifaces=$(networksetup -listallnetworkservices 2>/dev/null | tail -n +2)
+  while IFS= read -r iface; do
+    [ -z "$iface" ] && continue
+    # SOCKS proxy
+    local socks_info
+    socks_info=$(networksetup -getsocksfirewallproxy "$iface" 2>/dev/null)
+    if echo "$socks_info" | grep -q "^Enabled: Yes"; then
+      local sh sp
+      sh=$(echo "$socks_info" | awk '/^Server:/{print $2}')
+      sp=$(echo "$socks_info" | awk '/^Port:/{print $2}')
+      echo "socks5://${sh}:${sp}" && return
+    fi
+    # HTTP proxy (some tools set HTTP proxy instead of SOCKS)
+    local http_info
+    http_info=$(networksetup -getwebproxy "$iface" 2>/dev/null)
+    if echo "$http_info" | grep -q "^Enabled: Yes"; then
+      local hh hp
+      hh=$(echo "$http_info" | awk '/^Server:/{print $2}')
+      hp=$(echo "$http_info" | awk '/^Port:/{print $2}')
+      echo "http://${hh}:${hp}" && return
+    fi
+  done <<< "$ifaces"
 
-  # 3. Probe common local proxy ports
-  for port in 7890 1080 10808 1086 7891; do
-    nc -z -w1 127.0.0.1 "$port" 2>/dev/null && echo "socks5://127.0.0.1:$port" && return
+  # ── Priority 3: read port from running process configs ───────────────
+  # Clash Verge — read mixed-port / socks-port from active profile
+  local clash_port
+  clash_port=$(
+    # Try Clash Verge config locations
+    for cfg in \
+      "$HOME/.config/clash-verge/profiles"/*.yaml \
+      "$HOME/.config/clash/config.yaml" \
+      "$HOME/Library/Application Support/io.github.clash-verge-rev.clash-verge-rev/profiles"/*.yaml \
+      "$HOME/Library/Preferences/com.metacubex.ClashX-Pro/config.yaml"; do
+      [ -f "$cfg" ] || continue
+      # mixed-port (handles both SOCKS5 and HTTP)
+      grep -E '^mixed-port:' "$cfg" 2>/dev/null | awk '{print $2}' | head -1
+    done | head -1
+  )
+  [ -n "$clash_port" ] && nc -z -w1 127.0.0.1 "$clash_port" 2>/dev/null \
+    && echo "socks5://127.0.0.1:${clash_port}" && return
+
+  # V2Ray / Xray — read inbound port from config.json
+  local v2ray_port
+  v2ray_port=$(
+    for cfg in \
+      "$HOME/.config/v2ray/config.json" \
+      "$HOME/.config/xray/config.json" \
+      "/usr/local/etc/v2ray/config.json" \
+      "/usr/local/etc/xray/config.json"; do
+      [ -f "$cfg" ] || continue
+      # Look for socks inbound port
+      python3 -c "
+import json,sys
+d=json.load(open('$cfg'))
+for ib in d.get('inbounds',[]):
+    if ib.get('protocol') in ('socks','http'):
+        print(ib.get('port',''))
+        break
+" 2>/dev/null | head -1
+    done | head -1
+  )
+  [ -n "$v2ray_port" ] && nc -z -w1 127.0.0.1 "$v2ray_port" 2>/dev/null \
+    && echo "socks5://127.0.0.1:${v2ray_port}" && return
+
+  # sing-box — read inbound listen port
+  local singbox_port
+  singbox_port=$(
+    for cfg in \
+      "$HOME/.config/sing-box/config.json" \
+      "/usr/local/etc/sing-box/config.json"; do
+      [ -f "$cfg" ] || continue
+      python3 -c "
+import json,sys
+d=json.load(open('$cfg'))
+for ib in d.get('inbounds',[]):
+    if ib.get('type') in ('socks','mixed','http'):
+        print(ib.get('listen_port',''))
+        break
+" 2>/dev/null | head -1
+    done | head -1
+  )
+  [ -n "$singbox_port" ] && nc -z -w1 127.0.0.1 "$singbox_port" 2>/dev/null \
+    && echo "socks5://127.0.0.1:${singbox_port}" && return
+
+  # ── Priority 4: port scan — all known + common custom ports ─────────
+  # Covers: Clash(7890,7891,7897), mixed-port variants, V2Ray(10808,10809),
+  #         sing-box(1080,2080), Shadowsocks(1086,1087),
+  #         Surge(6152,6153), Proxifier(8888), custom(8080,8118,9090,1089)
+  for port in \
+    7890 7891 7892 7893 7894 7895 7896 7897 7898 7899 \
+    1080 1081 1082 1083 1084 1085 1086 1087 1088 1089 \
+    10808 10809 10810 10811 \
+    2080 2081 \
+    6152 6153 \
+    8080 8118 8888 9090 \
+    20170 20171 20172; do
+    nc -z -w1 127.0.0.1 "$port" 2>/dev/null \
+      && echo "socks5://127.0.0.1:${port}" && return
   done
 
   echo ""  # no proxy detected
@@ -156,8 +241,9 @@ detect_proxy() {
 
 # ── Detect TUN mode (all-traffic VPN) ────────────────────────────────────
 is_tun_active() {
-  # utun0-2 are macOS built-ins; utun3+ or tun* usually signal VPN TUN mode
-  ifconfig 2>/dev/null | grep -qE '^(utun[3-9]|utun[1-9][0-9]|tun[0-9])'
+  # utun0-2 are macOS built-ins; utun3+ or tun* usually signal VPN/TUN mode
+  # Also check for common VPN tun interface names (wireguard, openvpn, etc.)
+  ifconfig 2>/dev/null | grep -qE '^(utun[3-9]|utun[1-9][0-9]+|tun[0-9]|wg[0-9]|ipsec[0-9])'
 }
 ```
 
@@ -223,18 +309,18 @@ ssh_auto() {
     rc=$?
   fi
 
-  # ── Attempt 3: if still failed and no proxy, probe ports and retry ───
+  # ── Attempt 3: if still failed and no proxy, re-run full detection ───
+  # (proxy may have started after first detect_proxy call)
   if [ $rc -ne 0 ] && [ -z "$PROXY" ]; then
-    echo "[ssh-auto] Direct failed; probing proxy ports..."
-    for port in 7890 1080 10808 1086 7891; do
-      if nc -z -w1 127.0.0.1 "$port" 2>/dev/null; then
-        echo "[ssh-auto] Found proxy on port $port — retrying"
-        ssh -o "ProxyCommand=nc -X 5 -x 127.0.0.1:${port} %h %p" \
-            -o ConnectTimeout=15 $ssh_base_args
-        rc=$?
-        break
-      fi
-    done
+    echo "[ssh-auto] Direct failed; re-probing for any proxy..."
+    PROXY=$(detect_proxy)
+    if [ -n "$PROXY" ]; then
+      local addr="${PROXY#*://}"; local ph="${addr%:*}"; local pp="${addr##*:}"
+      echo "[ssh-auto] Found proxy $PROXY — retrying"
+      ssh -o "ProxyCommand=nc -X 5 -x ${ph}:${pp} %h %p" \
+          -o ConnectTimeout=15 $ssh_base_args
+      rc=$?
+    fi
   fi
 
   return $rc
@@ -259,35 +345,56 @@ SSH connection attempt
        If it fails: check firewall, server down, wrong port
 ```
 
-### Common Clash Verge / V2Ray ports
+### Common proxy ports (auto-scanned by `detect_proxy`)
 
-| Tool | Default SOCKS5 port | Default HTTP port |
-|---|---|---|
-| Clash Verge | 7890 | 7890 |
-| V2Ray / Xray | 10808 | 10809 |
-| sing-box | 1080 | 1080 |
-| Shadowsocks (macOS) | 1086 | 1087 |
-| Surge | 6153 (SOCKS5) | 6152 |
+| Tool | SOCKS5 port(s) | HTTP port(s) | Notes |
+|---|---|---|---|
+| **Clash Verge** | 7890, 7891, 7897 | 7890 | `mixed-port` handles both; 7897 is common custom |
+| **Clash Meta / ClashX Pro** | 7890, 7892 | 7890 | same `mixed-port` key in config |
+| **V2Ray / Xray** | 10808 | 10809 | configurable in `inbounds[].port` |
+| **sing-box** | 1080, 2080 | 1080 | `type: mixed` or `type: socks` |
+| **Shadowsocks (macOS client)** | 1086 | 1087 | |
+| **Surge** | 6153 | 6152 | |
+| **Proxifier** | 8888 | — | SOCKS5 only |
+| **Privoxy / tinyproxy** | — | 8118 | HTTP only |
+| **OpenWrt / custom** | 1080–1089 | 8080 | varies |
+| **WireGuard** | — | — | TUN mode, no local proxy port |
+| **OpenVPN** | — | — | TUN mode (`tun0`), no local proxy port |
+
+> **Custom port?** `detect_proxy` scans `7890–7899`, `1080–1089`, `10808–10811`, `2080–2081`, `6152–6153`, `8080`, `8118`, `8888`, `9090`, `20170–20172` — covers virtually all real-world setups. If your tool uses a completely non-standard port, set `ALL_PROXY=socks5://127.0.0.1:<port>` in your shell profile and `detect_proxy` will pick it up via Priority 1.
 
 ### Troubleshooting checklist
 
 ```bash
-# Is Clash/V2Ray running?
-pgrep -fl "clash\|v2ray\|xray\|sing-box\|shadowsocks" 
+# ── What proxy tool is running? ──────────────────────────────────────────
+pgrep -fl "clash\|v2ray\|xray\|sing-box\|shadowsocks\|surge\|proxifier"
 
-# What proxy is macOS system proxy set to?
+# ── What port is it listening on? ───────────────────────────────────────
+# Scan all common ports in one shot:
+for p in 7890 7891 7892 7897 1080 1086 10808 2080 6152 6153 8080 8118 8888 9090; do
+  nc -z -w1 127.0.0.1 $p 2>/dev/null && echo "LISTENING: $p"
+done
+
+# Or use lsof to see what the proxy process is actually listening on:
+lsof -nP -iTCP -sTCP:LISTEN | grep -iE "clash|v2ray|xray|sing|shadow|surge"
+
+# ── macOS system proxy settings ─────────────────────────────────────────
 networksetup -getsocksfirewallproxy Wi-Fi
 networksetup -getwebproxy Wi-Fi
 
-# Is the SOCKS5 port actually listening?
-nc -zv 127.0.0.1 7890
+# ── Env var proxy ────────────────────────────────────────────────────────
+env | grep -iE 'proxy|socks'
 
-# Does SSH work via proxy manually?
+# ── TUN interfaces ───────────────────────────────────────────────────────
+ifconfig | grep -E '^utun|^tun|^wg'
+
+# ── Test SSH manually with a specific proxy port ────────────────────────
 ssh -o "ProxyCommand=nc -X 5 -x 127.0.0.1:7890 %h %p" \
     -o ConnectTimeout=10 -i <key> -p <port> <user>@<host> 'echo OK'
+# Change 7890 to whatever port is LISTENING above
 
-# TUN interfaces present?
-ifconfig | grep -E '^utun|^tun'
+# ── If you know your custom port, export it so detect_proxy finds it ────
+export ALL_PROXY=socks5://127.0.0.1:<your_custom_port>
 ```
 
 ---
