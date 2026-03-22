@@ -60,15 +60,17 @@ The skill maintains two layers of context:
 **Personal skill** (available in all your projects):
 
 ```bash
-mkdir -p ~/.cursor/skills
-git clone https://github.com/michael-ltm/linux-server-skill.git ~/.cursor/skills/linux-server-ops
+# Works for both first install and future updates — run anytime
+git clone https://github.com/michael-ltm/linux-server-skill.git ~/.cursor/skills/linux-server-ops 2>/dev/null \
+  || git -C ~/.cursor/skills/linux-server-ops pull origin main
 ```
 
 **Project skill** (shared with your team via git):
 
 ```bash
 mkdir -p .cursor/skills
-git clone https://github.com/michael-ltm/linux-server-skill.git .cursor/skills/linux-server-ops
+git clone https://github.com/michael-ltm/linux-server-skill.git .cursor/skills/linux-server-ops 2>/dev/null \
+  || git -C .cursor/skills/linux-server-ops pull origin main
 ```
 
 Restart Cursor. The skill is automatically discovered — no configuration needed.
@@ -76,8 +78,8 @@ Restart Cursor. The skill is automatically discovered — no configuration neede
 ### Option 2: Claude Code (claude.ai/code · Anthropic)
 
 ```bash
-mkdir -p ~/.claude/skills
-git clone https://github.com/michael-ltm/linux-server-skill.git ~/.claude/skills/linux-server-ops
+git clone https://github.com/michael-ltm/linux-server-skill.git ~/.claude/skills/linux-server-ops 2>/dev/null \
+  || git -C ~/.claude/skills/linux-server-ops pull origin main
 ```
 
 The agent reads skills from `~/.claude/skills/` automatically when you start a session.
@@ -85,29 +87,22 @@ The agent reads skills from `~/.claude/skills/` automatically when you start a s
 ### Option 3: OpenClaw
 
 ```bash
-mkdir -p ~/.openclaw/skills
-git clone https://github.com/michael-ltm/linux-server-skill.git ~/.openclaw/skills/linux-server-ops
+git clone https://github.com/michael-ltm/linux-server-skill.git ~/.openclaw/skills/linux-server-ops 2>/dev/null \
+  || git -C ~/.openclaw/skills/linux-server-ops pull origin main
 ```
 
 Or configure the skill path in OpenClaw's settings panel to point to the cloned directory.
 
 ### Option 4: Any AI Coding Assistant (Generic)
 
-If your tool supports custom skills/tools/agents via a directory of markdown files, clone this repo and point the tool at the directory:
-
 ```bash
-git clone https://github.com/michael-ltm/linux-server-skill.git /path/to/your-tool/skills/linux-server-ops
+git clone https://github.com/michael-ltm/linux-server-skill.git /path/to/skills/linux-server-ops 2>/dev/null \
+  || git -C /path/to/skills/linux-server-ops pull origin main
 ```
 
 The main entry point is `SKILL.md`. The agent reads it first, then loads referenced guide files on demand.
 
-### Keeping the Skill Updated
-
-```bash
-# Update to latest version
-cd ~/.cursor/skills/linux-server-ops   # or ~/.claude/skills/linux-server-ops
-git pull origin main
-```
+> **How it works**: `git clone` succeeds on first install. If the directory already exists it fails silently (`2>/dev/null`), then `||` triggers `git pull` to update instead. One command, works every time.
 
 ---
 
