@@ -1,0 +1,13 @@
+{
+  "name": "linux-server-skill",
+  "owner": {
+    "name": "michael-ltm"
+  },
+  "plugins": [
+    {
+      "name": "linux-server-skill",
+      "source": "./",
+      "description": "AI-driven Linux server management via SSH: deployment, monitoring, databases, Docker, SSL, firewall, logs, and infrastructure operations"
+    }
+  ]
+}

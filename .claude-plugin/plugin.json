@@ -1,0 +1,8 @@
+{
+  "name": "linux-server-skill",
+  "version": "1.0.0",
+  "description": "AI-driven Linux server management: deployment, monitoring, databases, Docker, SSL, and infrastructure operations",
+  "author": {"name": "michael-ltm"},
+  "repository": "https://github.com/michael-ltm/linux-server-skill",
+  "license": "MIT"
+}
